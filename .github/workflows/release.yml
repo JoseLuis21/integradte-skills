@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUMP="${{ inputs.bump }}"
+          LATEST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+
+          if [[ -z "${LATEST_TAG}" ]]; then
+            case "${BUMP}" in
+              major) NEXT_TAG="v1.0.0" ;;
+              minor) NEXT_TAG="v0.1.0" ;;
+              patch) NEXT_TAG="v0.0.1" ;;
+              *) echo "Unsupported bump type: ${BUMP}" >&2; exit 1 ;;
+            esac
+          else
+            VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
+
+            case "${BUMP}" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+              *)
+                echo "Unsupported bump type: ${BUMP}" >&2
+                exit 1
+                ;;
+            esac
+
+            NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          {
+            echo "latest_tag=${LATEST_TAG}"
+            echo "next_tag=${NEXT_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Collect release notes
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LATEST_TAG="${{ steps.version.outputs.latest_tag }}"
+          NEXT_TAG="${{ steps.version.outputs.next_tag }}"
+
+          if [[ -n "${LATEST_TAG}" ]]; then
+            RANGE="${LATEST_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          COMMITS="$(git log ${RANGE} --pretty=format:'- %s (%h)')"
+
+          if [[ -z "${COMMITS}" ]]; then
+            COMMITS="- No changes found in commit history."
+          fi
+
+          {
+            echo "body<<EOF"
+            echo "## ${NEXT_TAG}"
+            echo
+            echo "${COMMITS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        env:
+          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${NEXT_TAG}" -m "${NEXT_TAG}"
+          git push origin "${NEXT_TAG}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.body }}
+        run: |
+          gh release create "${NEXT_TAG}" \
+            --title "${NEXT_TAG}" \
+            --notes "${RELEASE_NOTES}"

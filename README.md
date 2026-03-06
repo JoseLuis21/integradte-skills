@@ -23,6 +23,23 @@ Puedes actualizar la skill instalada con:
 npx skills update
 ```
 
+## Releases
+
+El repo incluye un workflow manual en GitHub Actions para crear versiones con tags semánticos y GitHub Releases.
+
+Uso:
+
+1. Ve a `Actions > Release`
+2. Ejecuta `Run workflow`
+3. Elige el tipo de bump: `patch`, `minor` o `major`
+
+El workflow:
+
+- detecta el último tag `v*`
+- calcula la siguiente versión
+- crea y empuja el nuevo tag
+- genera un GitHub Release con notas basadas en los commits desde la versión anterior
+
 ## Qué incluye
 
 - `SKILL.md`: instrucciones principales de la skill
